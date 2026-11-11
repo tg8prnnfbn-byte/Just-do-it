@@ -175,67 +175,76 @@ def counter(t):
     return f"0:{int(t // 60):02d}:{int(t % 60):02d}"
 
 
-def render_video(path: Path):
-    alert_txt = text_screen(["УВАГА.", "ЦЕ НЕ НАВЧАННЯ."], 112)
-    end = text_screen(["КАСЕТА №1", "", "НЕЗАБАРОМ"], 72)
-    black = sf.canvas()[0]
+def make_assets():
     back, front = build_forest_layers()
-    wall, _ = build_window()
-    door = build_door()
-    co1 = {k: alert_screen(4, k) for k in (False, True)}
-    co2 = co2_screen()
+    return {
+        "alert_txt": text_screen(["УВАГА.", "ЦЕ НЕ НАВЧАННЯ."], 112),
+        "end": text_screen(["КАСЕТА №1", "", "НЕЗАБАРОМ"], 72),
+        "black": sf.canvas()[0], "back": back, "front": front,
+        "wall": build_window()[0], "door": build_door(),
+        "co1": {k: alert_screen(4, k) for k in (False, True)}, "co2": co2_screen(),
+    }
 
+
+def frame_at(t, A, subs=True):
+    """Кадр 4:3 з VHS-обробкою на момент t."""
+    black, end = A["black"], A["end"]
+    name, start = scene_at(t)
+    strength, osd = 1.0, True
+    if name == "alert":
+        img = A["alert_txt"].copy() if (t * 6) % 2 < 1.4 else black.copy()   # блимає
+    elif name == "co1":
+        img = A["co1"][t >= AT["rule"] + 1.6].copy()
+    elif name == "snow":
+        img, strength, osd = snow(), 1.6, False
+    elif name == "window":
+        # постать: з'являється на «Це була бабуся», стрибає ближче на «тричі», впритул на «ближче до хати»
+        img = A["back"].copy()
+        if t >= AT["grandma"]:
+            step = sum(t >= h for h in HITS)
+            s = [0.55, 0.8, 1.15, 1.6][step]
+            if t >= AT["closer"] + 1.4:
+                s = 1.6 + 1.1 * min(1, (t - AT["closer"] - 1.4) / 1.2)
+            flick = 150 if RNG.random() > 0.05 else 60
+            ghost(img, int(sf.CW * 0.58), int(560 + 220 * (s - 0.55)), s, flick)
+        img.paste(A["front"], (0, 0), A["front"])
+        z = 1 + 0.06 * (t - start) / (22.75 - start)       # повільний наїзд
+        w, h = int(sf.CW / z), int(sf.H / z)
+        img.paste(A["wall"], (0, 0), A["wall"])
+        img = img.crop(((sf.CW - w) // 2, (sf.H - h) // 2, (sf.CW + w) // 2, (sf.H + h) // 2)).resize((sf.CW, sf.H))
+        strength = 1.3 + (0.5 if any(0 <= t - hh < 0.12 for hh in HITS) else 0)
+    elif name == "co2":
+        img, strength = A["co2"].copy(), 1.4
+    elif name == "door":
+        img = A["door"].copy()
+        if t > AT["kitchen"] + 1.0:   # світло з кухні гасне після «з кухні»
+            k = min(1, (t - AT["kitchen"] - 1.0) / 0.3)
+            img = Image.blend(img, Image.new("RGB", img.size, (5, 5, 6)), k)
+        strength = 1.2
+    else:
+        img = Image.blend(black, end, min(1.0, (t - start) / 0.5))
+        osd, strength = False, 0.8
+    sub = current_sub(t)
+    if subs and sub and name not in ("snow", "end", "co1"):
+        img = subtitle(img, sub)
+    return vhs_fast(img, strength=strength, osd=osd, counter=counter(t + 1), t=t)
+
+
+def write_video(path: Path, size, make_frame, crf=28):
     proc = subprocess.Popen(
         ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
-         "-s", f"{sf.W}x{sf.H}", "-r", str(FPS), "-i", "-",
-         "-c:v", "libx264", "-preset", "slow", "-crf", "28", "-pix_fmt", "yuv420p", str(path)],
+         "-s", f"{size[0]}x{size[1]}", "-r", str(FPS), "-i", "-",
+         "-c:v", "libx264", "-preset", "slow", "-crf", str(crf), "-pix_fmt", "yuv420p", str(path)],
         stdin=subprocess.PIPE)
-    n = int(DUR * FPS)
-    for i in range(n):
-        t = i / FPS
-        name, start = scene_at(t)
-        strength, osd = 1.0, True
-        if name == "alert":
-            img = alert_txt.copy() if (t * 6) % 2 < 1.4 else black.copy()   # блимає
-        elif name == "co1":
-            img = co1[t >= AT["rule"] + 1.6].copy()
-        elif name == "snow":
-            img, strength, osd = snow(), 1.6, False
-        elif name == "window":
-            # постать: з'являється на «Це була бабуся», стрибає ближче на «тричі», впритул на «ближче до хати»
-            img = back.copy()
-            if t >= AT["grandma"]:
-                step = sum(t >= h for h in HITS)
-                s = [0.55, 0.8, 1.15, 1.6][step]
-                if t >= AT["closer"] + 1.4:
-                    s = 1.6 + 1.1 * min(1, (t - AT["closer"] - 1.4) / 1.2)
-                flick = 150 if RNG.random() > 0.05 else 60
-                ghost(img, int(sf.CW * 0.58), int(560 + 220 * (s - 0.55)), s, flick)
-            img.paste(front, (0, 0), front)
-            # повільний наїзд камери на вікно
-            z = 1 + 0.06 * (t - start) / (22.75 - start)
-            w, h = int(sf.CW / z), int(sf.H / z)
-            img.paste(wall, (0, 0), wall)
-            img = img.crop(((sf.CW - w) // 2, (sf.H - h) // 2, (sf.CW + w) // 2, (sf.H + h) // 2)).resize((sf.CW, sf.H))
-            strength = 1.3 + (0.5 if any(0 <= t - hh < 0.12 for hh in HITS) else 0)
-        elif name == "co2":
-            img, strength = co2.copy(), 1.4
-        elif name == "door":
-            img = door.copy()
-            if t >= AT["kitchen"]:   # світло з кухні гасне після «з кухні»
-                k = min(1, (t - AT["kitchen"] - 1.0) / 0.3) if t > AT["kitchen"] + 1.0 else 0
-                img = Image.blend(img, Image.new("RGB", img.size, (5, 5, 6)), k)
-            strength = 1.2
-        else:
-            img = Image.blend(black, end, min(1.0, (t - start) / 0.5))
-            osd, strength = False, 0.8
-        sub = current_sub(t)
-        if sub and name not in ("snow", "end", "co1"):
-            img = subtitle(img if img is not alert_txt else img.copy(), sub)
-        fr = vhs_fast(img, strength=strength, osd=osd, counter=counter(t + 1), t=t)
-        proc.stdin.write(sf.to_169(fr).tobytes())
+    for i in range(int(DUR * FPS)):
+        proc.stdin.write(make_frame(i / FPS).tobytes())
     proc.stdin.close()
     proc.wait()
+
+
+def render_video(path: Path):
+    A = make_assets()
+    write_video(path, (sf.W, sf.H), lambda t: sf.to_169(frame_at(t, A)))
 
 
 # ---------- звук ----------

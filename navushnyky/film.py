@@ -185,7 +185,22 @@ def actor(P, spec, x, y, h, t, seed=0, bob=0.0, **over):
     if "blink" not in over:
         sp["blink"] = blink(t, seed)
     spr = T.person(round(k, 3), **sp)
+    cs = contact_shadow(int(h * 0.34))
+    P.img.alpha_composite(cs, (int(x * S - cs.width / 2 - P.ox), int(y * S - cs.height / 2 - P.oy))) \
+        if -cs.width < x * S - P.ox < P.img.width and -cs.height < y * S - P.oy < P.img.height else None
     P.sprite(spr, x, y - bob * h * 0.03 * abs(math.sin(t * 6 + seed)), k)
+
+
+@lru_cache(maxsize=64)
+def contact_shadow(w):
+    """М'яка тінь під ногами: щільна посередині, розмита по краях."""
+    W, H = w * S, int(w * 0.3) * S
+    m = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(m).ellipse((W * 0.12, H * 0.2, W * 0.88, H * 0.8), fill=150)
+    m = m.filter(ImageFilter.GaussianBlur(H * 0.18))
+    img = Image.new("RGBA", (W, H), (20, 16, 50, 0))
+    img.putalpha(m)
+    return img
 
 
 # ---------- план кадрів ----------
@@ -196,7 +211,9 @@ def kitchen_baldwin(P, t, **o):
 SHOTS = []
 
 
-def shot(name, set_name, a, b, cams, draw_mid=None, draw_front=None, dof=0, creep=0.0016, kicks=(), xfade=False):
+def shot(name, set_name, a, b, cams, draw_mid=None, draw_front=None, dof=None, creep=0.0016, kicks=(), xfade=False):
+    if dof is None:                                    # розмитий фон на середніх/крупних планах, загальні — різкі
+        dof = 0 if set_name in ("town", "fext", "desk", "fint") else 5
     SHOTS.append(dict(name=name, set=set_name, a=a, b=b, cams=cams, mid=draw_mid, front=draw_front, dof=dof,
                       creep=creep, kicks=list(kicks), xfade=xfade))
 
@@ -442,7 +459,7 @@ sets.line, sets.ell = _line, _ell
 
 
 # ---------- камера й кадр ----------
-@lru_cache(maxsize=3)
+@lru_cache(maxsize=16)
 def load_set(name, dof):
     bg, fg = sets.SETS[name]()
     if dof:
@@ -504,9 +521,26 @@ def render_shot(sh, t):
     return frame.convert("RGB").resize((OW, OH), Image.LANCZOS)
 
 
+_YY, _XX = np.mgrid[0:OH, 0:OW].astype(np.float32)
+_VIG = np.clip(1.05 - 0.20 * (((_XX - OW / 2) / (OW / 2)) ** 2 + ((_YY - OH / 2) / (OH / 2)) ** 2) ** 1.4, 0.68, 1)
+
+
 def grade(img):
-    img = ImageEnhance.Color(img).enhance(1.1)
-    return ImageEnhance.Contrast(img).enhance(1.05)
+    """Кольорокорекція під зразок: S-крива контрасту, теплі світла / сині тіні, легке світіння, віньєтка."""
+    a = np.asarray(img).astype(np.float32) / 255.0
+    lum = a @ np.array([0.299, 0.587, 0.114], np.float32)
+    s_curve = lum + 0.22 * (lum - lum ** 2) * (lum - 0.5) * 4          # контраст у середніх тонах
+    a = a * (s_curve / np.maximum(lum, 1e-4))[..., None]
+    sh = np.clip(1 - lum * 2, 0, 1)[..., None]
+    hi = np.clip(lum * 2 - 1, 0, 1)[..., None]
+    a += sh * np.array([-0.02, -0.005, 0.05]) + hi * np.array([0.04, 0.02, -0.03])
+    gray = (a @ np.array([0.299, 0.587, 0.114], np.float32))[..., None]
+    a = gray + (a - gray) * 1.15                                        # насиченість
+    small = Image.fromarray((np.clip(a, 0, 1) * 255).astype(np.uint8)).resize((OW // 8, OH // 8), Image.BILINEAR)
+    b = np.asarray(small.filter(ImageFilter.GaussianBlur(6)).resize((OW, OH), Image.BILINEAR)).astype(np.float32) / 255
+    a += np.clip(b - 0.72, 0, 1) * 0.6                                  # світіння яскравих місць
+    a *= _VIG[..., None]
+    return Image.fromarray((np.clip(a, 0, 1) * 255).astype(np.uint8))
 
 
 def frame_at(t):

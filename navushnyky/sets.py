@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 S = 2
 INK = (11, 10, 12)
-LW = 6  # товщина контуру у 2x (=3 px на 1080)
+LW = 4  # товщина контуру у 2x (=2 px на 1080, тонше, як у зразку)
 
 
 def canvas(w, h, top, bot):
@@ -446,6 +446,109 @@ def office_chart():
     return img, None
 
 
-SETS = dict(kitchen=kitchen, kitchen_eve=lambda: kitchen(True), town=town, church=church, desk=desk,
+# ---------- фінальний «мальований» прохід: фактура, сонце й тінь, затінені кути ----------
+def finish(img, shadow=None, sun=(0.25, 0.2), warm=0.10, texture=0.06, seed=0):
+    """shadow: (x_top, x_bottom) у частках ширини — діагональна межа тіні від сусіднього будинку;
+    праворуч від неї все в глибокій синій тіні. sun: звідки світло (частки кадру)."""
+    a = np.asarray(img).astype(np.float32) / 255.0
+    h, w = a.shape[:2]
+    rnd = np.random.default_rng(seed)
+    # мальована фактура: кілька масштабів м'якого шуму
+    tex = np.zeros((h, w), np.float32)
+    for sc, amp in ((8, 1.0), (32, 0.6), (96, 0.35)):
+        small = rnd.standard_normal((h // sc + 2, w // sc + 2)).astype(np.float32)
+        tex += amp * np.asarray(Image.fromarray(small).resize((w, h), Image.BICUBIC))
+    a *= (1 + texture * tex / 1.6)[..., None]
+    # світлова карта: тепло біля «сонця», прохолодніше далі
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+    dist = np.sqrt(((xs / w - sun[0]) * 1.2) ** 2 + (ys / h - sun[1]) ** 2)
+    light = np.clip(1.15 - 0.55 * dist, 0.6, 1.15)
+    a *= light[..., None]
+    a[..., 0] += warm * np.clip(1 - dist, 0, 1) * 0.6
+    a[..., 1] += warm * np.clip(1 - dist, 0, 1) * 0.35
+    if shadow:
+        x_top, x_bot = shadow
+        edge = (x_top + (x_bot - x_top) * ys / h) * w
+        m = np.clip((xs - edge) / (w * 0.012), 0, 1)                    # м'який край тіні
+        shade_rgb = a * np.array([0.42, 0.46, 0.85]) + np.array([0.02, 0.03, 0.10])
+        a = a * (1 - m[..., None]) + shade_rgb * m[..., None]
+    # затемнення кутів (ambient occlusion)
+    r = np.sqrt(((xs - w / 2) / (w / 2)) ** 2 + ((ys - h / 2) / (h / 2)) ** 2)
+    a *= np.clip(1.08 - 0.22 * r ** 2.4, 0.7, 1.05)[..., None]
+    return Image.fromarray((np.clip(a, 0, 1) * 255).astype(np.uint8))
+
+
+def cobbles(img, box, base=(70, 76, 120), seed=1):
+    """Бруківка в перспективі: каміння дрібнішає до горизонту."""
+    d = ImageDraw.Draw(img)
+    x0, y0, x1, y1 = box
+    rnd = random.Random(seed)
+    y = y0
+    while y < y1:
+        f = (y - y0) / (y1 - y0)
+        sz = 14 + 46 * f
+        x = x0 - rnd.uniform(0, sz)
+        while x < x1:
+            c = tuple(int(v * rnd.uniform(0.8, 1.15)) for v in base)
+            d.rounded_rectangle(B((x + 2, y + 2, x + sz * rnd.uniform(1.1, 1.6), y + sz * 0.62)), radius=int(sz * 0.3 * S),
+                                fill=c, outline=tuple(int(v * 0.55) for v in base), width=2)
+            x += sz * 1.5
+        y += sz * 0.66
+
+
+def window_light(img, quad, alpha=70):
+    """Сонячне «вікно» на стіні/підлозі: паралелограм світла з тінню хрестовини."""
+    m = Image.new("L", img.size, 0)
+    md = ImageDraw.Draw(m)
+    md.polygon([(x * S, y * S) for x, y in quad], fill=alpha)
+    (ax, ay), (bx, by), (cx_, cy_), (dx, dy) = quad
+    mx0, my0 = (ax + dx) / 2, (ay + dy) / 2
+    mx1, my1 = (bx + cx_) / 2, (by + cy_) / 2
+    md.line([(mx0 * S, my0 * S), (mx1 * S, my1 * S)], fill=0, width=14 * S)
+    md.line([((ax + bx) / 2 * S, (ay + by) / 2 * S), ((dx + cx_) / 2 * S, (dy + cy_) / 2 * S)], fill=0, width=14 * S)
+    img.paste(Image.new("RGB", img.size, (255, 236, 170)), (0, 0), m.filter(ImageFilter.GaussianBlur(6 * S)))
+
+
+def _kitchen_v2(eve=False):
+    bg, fg = kitchen(eve)
+    if not eve:
+        window_light(bg, [(820, 1180), (1180, 1180), (1320, 1750), (900, 1750)], 80)
+        bg = finish(bg, shadow=None, sun=(0.25, 0.3), seed=1)
+    else:
+        bg = finish(bg, sun=(0.5, 0.45), warm=0.14, seed=2)
+    return bg, fg
+
+
+def _town_v2():
+    bg, fg = town()
+    cobbles(bg, (0, 2720, 1500, 3400), base=(150, 130, 110), seed=3)
+    return finish(bg, shadow=(0.62, 0.30), sun=(0.2, 0.25), seed=3), fg
+
+
+def _f(fn, **kw):
+    def g():
+        bg, fg = fn()
+        return finish(bg, **kw), fg
+    return g
+
+
+def _fext_v2():
+    bg, fg = factory_ext()
+    cobbles(bg, (0, 2320, 1500, 3000), base=(150, 130, 110), seed=5)
+    return finish(bg, shadow=(0.7, 0.45), sun=(0.2, 0.2), seed=5), fg
+
+
+SETS_V1 = dict(kitchen=kitchen, kitchen_eve=lambda: kitchen(True), town=town, church=church, desk=desk,
             navy=navy_office, radio=radio_room, fext=factory_ext, fint=factory_int, wedding=wedding,
             court=court, gold=gold, chart=office_chart)
+SETS = dict(kitchen=_kitchen_v2, kitchen_eve=lambda: _kitchen_v2(True), town=_town_v2,
+            church=_f(church, shadow=(0.78, 0.55), sun=(0.3, 0.2), seed=4),
+            desk=_f(desk, shadow=(0.85, 0.6), sun=(0.3, 0.3), seed=6),
+            navy=_f(navy_office, shadow=(0.86, 0.66), sun=(0.3, 0.25), seed=7),
+            radio=_f(radio_room, sun=(0.3, 0.45), warm=0.02, seed=8),
+            fext=_fext_v2,
+            fint=_f(factory_int, shadow=None, sun=(0.5, 0.15), seed=9),
+            wedding=_f(wedding, shadow=(0.82, 0.62), sun=(0.3, 0.15), seed=10),
+            court=_f(court, shadow=(0.80, 0.60), sun=(0.45, 0.2), seed=11),
+            gold=_f(gold, sun=(0.5, 0.45), warm=0.05, texture=0.03, seed=12),
+            chart=_f(office_chart, shadow=(0.9, 0.7), sun=(0.3, 0.3), seed=13))

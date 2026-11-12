@@ -29,8 +29,10 @@ S = sets.S
 INK = sets.INK
 FONT = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 120 * S)
 
-LINES = json.load(open(HERE / "voice" / "lines.json"))
-WORDS = json.load(open(HERE / "voice" / "words.json"))
+import os
+VOICE_DIR = Path(os.environ.get("VOICE_DIR", HERE / "voice"))
+LINES = json.load(open(VOICE_DIR / "lines.json"))
+WORDS = json.load(open(VOICE_DIR / "words.json"))
 DUR = LINES[-1]["e"] + 0.45
 
 
@@ -71,6 +73,27 @@ class Pen:
             self.d.rounded_rectangle([a, b], radius=r * S, fill=fill, outline=INK if ink else None, width=w if ink else 0)
         else:
             self.d.rectangle([a, b], fill=fill, outline=INK if ink else None, width=w if ink else 0)
+
+    def glow(self, cx, cy, rx, ry, color, alpha=90, blur=40):
+        """Справжнє напівпрозоре світіння (окремий шар з розмиттям)."""
+        a, b = self.p(cx - rx, cy - ry), self.p(cx + rx, cy + ry)
+        pad = int(blur * S * 2)
+        x0, y0 = int(min(a[0], b[0])) - pad, int(min(a[1], b[1])) - pad
+        x1, y1 = int(max(a[0], b[0])) + pad, int(max(a[1], b[1])) + pad
+        if x1 < 0 or y1 < 0 or x0 > self.img.width or y0 > self.img.height:
+            return
+        m = Image.new("L", (x1 - x0, y1 - y0), 0)
+        ImageDraw.Draw(m).ellipse((a[0] - x0, a[1] - y0, b[0] - x0, b[1] - y0), fill=alpha)
+        m = m.filter(ImageFilter.GaussianBlur(blur * S))
+        layer = Image.new("RGBA", m.size, color)
+        layer.putalpha(m)
+        self.img.alpha_composite(layer, (x0, y0)) if x0 >= 0 and y0 >= 0 else self._paste_clip(layer, x0, y0)
+
+    def _paste_clip(self, layer, x0, y0):
+        cx0, cy0 = max(0, -x0), max(0, -y0)
+        if cx0 >= layer.width or cy0 >= layer.height:
+            return
+        self.img.alpha_composite(layer.crop((cx0, cy0, layer.width, layer.height)), (max(0, x0), max(0, y0)))
 
     def line(self, pts, w=6, fill=INK):
         self.d.line([self.p(*q) for q in pts], fill=fill, width=w, joint="curve")

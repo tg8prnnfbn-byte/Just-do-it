@@ -18,6 +18,11 @@ parts, t, meta, words = [], LEAD, [], []
 sr = 24000
 parts.append(np.zeros(int(LEAD * sr), np.float32))
 for ln in lines:
+    m = re.match(r"#p([\d.]+)\s+(.*)", ln)                # «#p0.8 текст» — додаткова пауза перед реченням
+    if m:
+        extra, ln = float(m.group(1)), m.group(2)
+        parts.append(np.zeros(int(extra * sr), np.float32))
+        t += extra
     x, sr = k.create(ln, voice=VOICE, speed=SPEED, lang="en-us")
     x = np.asarray(x, np.float32)
     # обрізати тишу на краях

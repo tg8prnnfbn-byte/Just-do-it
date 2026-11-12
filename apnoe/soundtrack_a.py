@@ -30,10 +30,11 @@ def m(n):
     return 440.0 * 2 ** ((n - 69) / 12)
 
 
-def snore(dur, loud=1.0):
-    """Хропіння: вдих з тріпотінням ~28 Гц і шумом, видих тихіше; цикл ~2.4 с."""
+def snore(dur, loud=1.0, t0=0.0):
+    """Хропіння: вдих з тріпотінням ~28 Гц і шумом, видих тихіше; цикл 2.4 с у глобальній фазі
+    (t0 — час початку), тож звук збігається з відкритим ротом на вдиху."""
     n = D.ns(dur)
-    t = np.arange(n) / D.SR
+    t = t0 + np.arange(n) / D.SR
     ph = (t % 2.4) / 2.4
     inhale = np.clip(np.sin(np.pi * ph / 0.55), 0, 1) * (ph < 0.55)
     exhale = np.clip(np.sin(np.pi * (ph - 0.6) / 0.35), 0, 1) * (ph > 0.6) * (ph < 0.95) * 0.35
@@ -78,11 +79,12 @@ def music():
 def sfx():
     buf = np.zeros((2, N))
     a_sil, a_snort = SH["silence"]["a"], SH["snort"]["a"]
-    D.place(buf, D.st(snore(a_sil - 0.0, 1.0)), 0.0, 0.8)                           # хропіння до тиші
+    D.place(buf, D.st(snore(a_sil - 0.0, 1.0, 0.0)), 0.0, 0.8)                      # хропіння до тиші
     D.place(buf, D.st(D.bp(R.standard_normal(D.ns(0.7)), 200, 1200) * np.hanning(D.ns(0.7)) * 1.4), a_snort, 0.9)   # фирк
     for name, loud in (("snort", 1.0), ("rollover", 0.9), ("calm", 0.8), ("record", 0.7)):
-        D.place(buf, D.st(snore(SH[name]["b"] - SH[name]["a"] - 0.1, loud)), SH[name]["a"] + 0.4 if name == "snort" else SH[name]["a"], 0.7)
-    a, b = SH["seconds"]["a"], SH["seconds"]["b"]                                  # цокання
+        st0 = SH[name]["a"] + (0.4 if name == "snort" else 0.0)
+        D.place(buf, D.st(snore(SH[name]["b"] - st0 - 0.1, loud, st0)), st0, 0.7)
+    a, b = F.Ls(4), SH["snort"]["a"]                                               # цокання секунд у тиші
     for t in np.arange(a, b, 0.5):
         D.place(buf, D.st(D.modal(0.05, [(3200, 1, .006), (5100, .5, .004)], R)), t, 0.5)
     a, b = SH["cpr"]["a"], SH["cpr"]["b"]                                           # метроном ~110/хв

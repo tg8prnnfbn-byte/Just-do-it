@@ -23,6 +23,7 @@ import film as F  # noqa: E402
 import asets  # noqa: E402
 import toon as T  # noqa: E402
 from film_h import phone as phone_h  # noqa: E402
+import sleeper as SL  # noqa: E402
 
 Ls, Wt, ss, shot, actor, burst, star, sparkles = F.Ls, F.Wt, F.ss, F.shot, F.actor, F.burst, F.star, F.sparkles
 S = F.S
@@ -56,15 +57,11 @@ def head_sprite(k, angle, expr, blink, mask=False):
 
 
 def sleeper(P, t, expr="neutral", blink=True, snore=0.0, mask=False):
-    """Він лежить на лівій подушці; snore — розгойдування голови від хропіння."""
-    k = 1.6
-    ang = 78 + 4 * snore * math.sin(t * 9)
-    spr = head_sprite(k, round(ang), expr, blink, mask)
-    x, y = 520, 1420
-    P.img.alpha_composite(spr, (int(x * S - spr.width / 2 - P.ox), int(y * S - spr.height / 2 - P.oy)))
+    """Чоловік лежить на боці (sleeper.man); expr лишено для сумісності — обличчя завжди спокійне уві сні."""
+    SL.man(P, t, HIM, snoring=snore, mask=mask)
 
 
-def her(P, t, expr="neutral", arms=("down", "down"), x=1000, y=2250, h=1150, **o):
+def her(P, t, expr="neutral", arms=("down", "down"), x=1030, y=2170, h=1150, **o):
     actor(P, HER, x, y, h, t, seed=5, expr=expr, arms=arms, **o)
 
 
@@ -251,49 +248,77 @@ def build():
         if sawing:
             saw(P, 300, 1250, t)
 
-    shot("hook", "bedroom2", 0.0, Ls(1), [(0, 760, 1500, 1800, 0)],
-         draw_mid=lambda P, t, lt: bed_mid(P, t, lt), draw_front=lambda P, t, lt: bed_front(P, t, lt, 1.3))
+    t_rev = Ls(6) + 0.55                                       # кінець від'їзду: обоє в кадрі
+
+    def wife(t):
+        """Реакція дружини: спить → розплющує очі → тривога → страх → після фирку — роздратування."""
+        if t < t_sil + 0.9:
+            return dict(expr="neutral", blink=True)
+        if t < Ls(5):
+            return dict(expr="neutral", blink=SL.breath(t, 0.6) > 0.97)
+        if t < Ls(6):
+            return dict(expr="worry")
+        if t < t_snort:
+            return dict(expr="shock")
+        if t < t_snort + 0.8:
+            return dict(expr="shock")
+        return dict(expr="squint")
+
+    def bed_mid2(P, t, lt, snoring=1.0, mask=False, w=None):
+        her(P, t, arms=("down", "down"), **(w or wife(t)))
+        sleeper(P, t, snore=snoring, mask=mask)
+
+    def bed_front2(P, t, lt, snoring=1.0, loud=0.0, sawing=False):
+        SL.blanket_over(P, t, snoring)
+        if loud > 0:
+            zz(P, 640, 1250, t, loud)
+        if sawing:
+            saw(P, 650, 1430, t)
+
+    ECU = (480, 1400, 560)
+    shot("hook", "bedroom2", 0.0, Ls(1), [(0, *ECU, 0), (Ls(1), 480, 1400, 510, 0)],
+         draw_mid=lambda P, t, lt: bed_mid2(P, t, lt, w=dict(expr="neutral", blink=True)),
+         draw_front=lambda P, t, lt: bed_front2(P, t, lt), creep=0.0, dof=3)
     shot("clock", "phone", Ls(1), Ls(2), [(0, 650, 1150, 1300, 0)],
          draw_front=lambda P, t, lt: clock(P, 650, 1150, 900, "2:00"))
-    shot("chainsaw", "bedroom2", Ls(2), t_sil, [(0, 650, 1400, 1500, 4)],
-         draw_mid=lambda P, t, lt: bed_mid(P, t, lt), draw_front=lambda P, t, lt: bed_front(P, t, lt, 1.6, True),
-         kicks=[Wt("chainsaw", L[2]["s"])])
-
-    def silent_mid(P, t, lt):
-        her(P, t, "shock" if t > Ls(4) else "worry", ("down", "down"))
-        sleeper(P, t, "neutral", blink=True, snore=0.0)
-
-    shot("silence", "bedroom2", t_sil, Ls(4), [(0, 760, 1500, 1700, 0), (1.0, 700, 1450, 1450, 0)],
-         draw_mid=silent_mid, creep=0.0025)
-
-    def secs(P, t, lt):
-        n = 5 if t < Ls(5) else 10 if t < Ls(6) else 15
-        clock(P, 650, 1150, 900, f"2:00:{n:02d}")
-
-    shot("seconds", "phone", Ls(4), t_snort, [(0, 650, 1150, 1300, 0)], draw_front=secs,
-         kicks=[Ls(5) + 0.06, Ls(6) + 0.06], creep=0.003)
-    shot("snort", "bedroom2", t_snort, Ls(8), [(0, 600, 1420, 1100, -3), (0.5, 700, 1450, 1500, 0)],
-         draw_mid=lambda P, t, lt: bed_mid(P, t, lt, her_expr="shock"),
-         draw_front=lambda P, t, lt: (burst(P, 760, 1150, 170 * min(1, lt * 5)) if lt < 0.9 else None, bed_front(P, t, lt, 1.2)),
-         kicks=[t_snort + 0.05])
-    shot("rollover", "bedroom2", Ls(8), Ls(9), [(0, 760, 1500, 1800, 0)],
-         draw_mid=lambda P, t, lt: (her(P, t, "squint", ("hold", "hold")), sleeper(P, t, "laugh", snore=1.0)),
-         draw_front=lambda P, t, lt: bed_front(P, t, lt, 1.0))
+    shot("chainsaw", "bedroom2", Ls(2), t_sil, [(0, 500, 1405, 660, 0), (t_sil - Ls(2), 500, 1405, 600, 0)],
+         draw_mid=lambda P, t, lt: bed_mid2(P, t, lt, w=dict(expr="neutral", blink=True)),
+         draw_front=lambda P, t, lt: bed_front2(P, t, lt, loud=0.9, sawing=True),
+         kicks=[Wt("chainsaw", L[2]["s"])], creep=0.0, dof=3)
+    shot("silence", "bedroom2", t_sil, t_snort,
+         [(0, 500, 1405, 600, 0), (0.9, 500, 1405, 600, 0), (t_rev - t_sil, 745, 1440, 1520, 0)],
+         draw_mid=lambda P, t, lt: bed_mid2(P, t, lt, snoring=0.0),
+         draw_front=lambda P, t, lt: bed_front2(P, t, lt, snoring=0.0), creep=0.0, dof=0)
+    shot("snort", "bedroom2", t_snort, Ls(8), [(0, 745, 1440, 1520, 0)],
+         draw_mid=lambda P, t, lt: bed_mid2(P, t, lt, snoring=1.0),
+         draw_front=lambda P, t, lt: (bed_front2(P, t, lt, loud=1.0),
+                                      burst(P, 640, 1250, 120 * min(1, lt * 5)) if lt < 0.7 else None),
+         kicks=[t_snort + 0.05], creep=0.0006)
+    shot("rollover", "bedroom2", Ls(8), Ls(9), [(0, 745, 1440, 1520, 0), (Ls(9) - Ls(8), 740, 1450, 1500, 0)],
+         draw_mid=lambda P, t, lt: (her(P, t, "squint", ("down", "down"), blink=t > Ls(8) + 0.9), sleeper(P, t, snore=1.0)),
+         draw_front=lambda P, t, lt: bed_front2(P, t, lt, loud=0.8))
 
     def apnea_front(P, t, lt):
         if t >= Wt("apnea", L[9]["s"]) - 0.05:
-            pause_icon(P, 520, 1100, 130 * min(1, (t - Wt("apnea", L[9]["s"]) + 0.05) * 6), t)
+            pause_icon(P, 430, 1180, 110 * min(1, (t - Wt("apnea", L[9]["s"]) + 0.05) * 6), t)
 
-    shot("name", "bedroom2", Ls(9), Ls(10), [(0, 560, 1400, 1100, 0)],
-         draw_mid=lambda P, t, lt: sleeper(P, t, "neutral", snore=0.0), draw_front=apnea_front,
+    shot("name", "bedroom2", Ls(9), Ls(10), [(0, 520, 1390, 700, 0)],
+         draw_mid=lambda P, t, lt: bed_mid2(P, t, lt, snoring=0.0, w=dict(expr="neutral", blink=True)),
+         draw_front=lambda P, t, lt: (SL.blanket_over(P, t), apnea_front(P, t, lt)),
          kicks=[Wt("apnea", L[9]["s"])])
     # пояснення: горло
     t_shut = Wt("folds", L[11]["s"])
     t_straw = Wt("straw", L[11]["s"])
+    t_relax = Wt("relax", L[10]["s"])
+
+    def anat(P, t, lt):
+        relax = ss((t - (t_relax - 0.4)) / 0.8)
+        close = ss((t - t_shut) / 0.7) if t > t_shut else 0.0
+        SL.anatomy(P, t, relax=relax, close=close)
+
     shot("throat", "panel", Ls(10), t_straw - 0.07,
-         [(0, 700, 1250, 2100, 0), (t_shut - Ls(10), 660, 1150, 1600, 0)],
-         draw_front=lambda P, t, lt: throat(P, t, ss((t - Wt("relax", L[10]["s"])) / 1.2) * 0.45 + (ss((t - t_shut) / 0.6) * 0.55 if t > t_shut else 0)),
-         xfade=True)
+         [(0, 670, 1200, 2000, 0), (t_relax - Ls(10), 700, 1150, 1500, 0), (t_shut - Ls(10) + 0.6, 790, 1100, 1100, 0)],
+         draw_front=anat, xfade=True, creep=0.0)
     shot("straw", "panel", t_straw - 0.07, Ls(12), [(0, 700, 1300, 1500, 0)],
          draw_front=lambda P, t, lt: straw(P, t, ss((lt - 0.4) / 0.8)), kicks=[t_straw + 0.5])
     t_jolt = Wt("jolts", L[12]["s"])
@@ -326,25 +351,25 @@ def build():
     shot("risks", "panel", Ls(14), Ls(15), [(0, 700, 1050, 1700, 0)], draw_front=risks,
          kicks=[Wt("pressure", L[14]["s"]), Wt("heart", L[14]["s"]), Wt("stroke", L[14]["s"])])
     # що робити
-    shot("todo", "bedroom2", Ls(15), Ls(16), [(0, 900, 1450, 1400, 0)],
-         draw_mid=lambda P, t, lt: (her(P, t, "proud", ("hip", "point")), sleeper(P, t, "neutral", snore=0.3)),
-         draw_front=lambda P, t, lt: sparkles(P, 1000, 1000, t, 160, n=4, seed=3), xfade=True)
+    shot("todo", "bedroom2", Ls(15), Ls(16), [(0, 860, 1450, 1400, 0)],
+         draw_mid=lambda P, t, lt: (her(P, t, "proud", ("down", "down")), sleeper(P, t, snore=0.3)),
+         draw_front=lambda P, t, lt: (SL.blanket_over(P, t, 0.3), sparkles(P, 1000, 1150, t, 160, n=4, seed=3)), xfade=True)
 
     def calm(P, t, lt):
         her(P, t, "smile", ("down", "down"))
-        sleeper(P, t, "laugh", snore=1.0)
+        sleeper(P, t, snore=1.0)
 
-    shot("calm", "bedroom2", Ls(16), Ls(17), [(0, 760, 1500, 1700, 0)], draw_mid=calm,
-         draw_front=lambda P, t, lt: bed_front(P, t, lt, 0.9))
+    shot("calm", "bedroom2", Ls(16), Ls(17), [(0, 760, 1455, 1650, 0)], draw_mid=calm,
+         draw_front=lambda P, t, lt: bed_front2(P, t, lt, loud=0.8))
     t_doc = Wt("doctor", L[17]["s"]) - 0.25
 
     def record(P, t, lt):
         her(P, t, "squint", ("hold", "hold"))
-        sleeper(P, t, "laugh", snore=1.0)
-        mini_phone(P, 760, 1360, 260, t, "rec")
+        sleeper(P, t, snore=1.0)
+        mini_phone(P, 900, 1330, 240, t, "rec")
 
     shot("record", "bedroom2", Ls(17), t_doc, [(0, 800, 1450, 1500, 0), (1.5, 880, 1420, 1250, 0)],
-         draw_mid=record, draw_front=lambda P, t, lt: bed_front(P, t, lt, 0.8))
+         draw_mid=record, draw_front=lambda P, t, lt: bed_front2(P, t, lt, loud=0.6))
     shot("doctor", "doctor", t_doc, Ls(19), [(0, 750, 1300, 1900, 0), (Ls(18) - t_doc + 1.2, 740, 1350, 1700, 0)],
          draw_mid=doctor_scene, draw_front=lambda P, t, lt: sparkles(P, 710, 1560, t, 120, n=3, seed=5) if t > Wt("treatable", L[18]["s"]) else None,
          xfade=True)
@@ -354,22 +379,22 @@ def build():
     def emergency(P, t, lt):
         if t < t_call:
             her(P, t, "shock", ("out", "out"))
-            sleeper(P, t, "neutral", blink=True, snore=0.0)
+            sleeper(P, t, snore=0.0)
         else:
             her(P, t, "worry", ("hold", "ear"))
-            sleeper(P, t, "neutral", blink=True, snore=0.0)
-            mini_phone(P, 1200, 1330, 240, t, "sos")
+            sleeper(P, t, snore=0.0)
+            mini_phone(P, 1130, 1330, 230, t, "sos")
             P.glow(760, 900, 900, 700, (230, 60, 60), int(60 + 40 * math.sin(t * 8)), 120)
 
     shot("emergency", "bedroom2", Ls(19), Ls(20), [(0, 760, 1500, 1700, 0), (t_call - Ls(19), 860, 1400, 1450, 3)],
-         draw_mid=emergency, kicks=[t_call])
+         draw_mid=emergency, draw_front=lambda P, t, lt: SL.blanket_over(P, t, 0.0), kicks=[t_call])
     shot("cpr", "panel", Ls(20), Ls(21), [(0, 560, 1250, 1900, 0)], draw_front=lambda P, t, lt: compressions(P, t),
          kicks=[Wt("Hard", L[20]["s"])], creep=0.0008)
     # фінал: лікується — тихий сон з маскою
     shot("final", "bedroom2", Ls(21), F.DUR, [(0, 700, 1450, 1500, 0), (Ls(22) - Ls(21), 760, 1500, 1800, 0)],
          draw_mid=lambda P, t, lt: (her(P, t, "smile", ("down", "down"), blink=True),
-                                    sleeper(P, t, "smile", blink=True, snore=0.0, mask=True)),
-         draw_front=lambda P, t, lt: zz(P, 900, 1150, t, 0.6, n=2), xfade=True)
+                                    sleeper(P, t, snore=0.0, mask=True)),
+         draw_front=lambda P, t, lt: (SL.blanket_over(P, t), zz(P, 640, 1250, t, 0.5, n=2)), xfade=True)
 
 
 F.build_shots = build

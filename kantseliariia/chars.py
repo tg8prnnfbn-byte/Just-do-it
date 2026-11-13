@@ -146,7 +146,7 @@ def dad(P, x, y, t, s=1.0, walk=None, point=False, tremble=0.0, spiral=False, mo
     b_ang = {"angry": 18, "furious": 26, "suspicious": 10, "shock": -14, "dizzy": -6}.get(expr, 0)
     for side in (-1, 1):
         bx, by = R(x + side * 66 * s, fy - 80 * s - (10 * s if expr == "shock" else 0))
-        brow(P, bx, by, 88 * s, side * b_ang, thick=int(22 * s * 2) // 2 + 6)
+        brow(P, bx, by, 88 * s, -side * b_ang, thick=int(22 * s * 2) // 2 + 6)
     mx, my = R(x, fy + 150 * s)
     shape = {"angry": "frown", "furious": "frown", "suspicious": "frown"}.get(expr, "neutral")
     mouth(P, mx, my, 120 * s, mouth_open, shape)

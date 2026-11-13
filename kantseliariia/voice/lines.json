@@ -1,0 +1,44 @@
+[
+ {
+  "text": "Penelope... why is our son GLOWING?!",
+  "who": "dad",
+  "s": 2.3,
+  "e": 4.303,
+  "pre": 2.3
+ },
+ {
+  "text": "I'm a pencil! You're a pen! Where did he get the NEON?!",
+  "who": "dad",
+  "s": 5.103,
+  "e": 8.038,
+  "pre": 0.35
+ },
+ {
+  "text": "It's... genes! My grandma had a yellow refill!",
+  "who": "mom",
+  "s": 8.838,
+  "e": 11.63,
+  "pre": 0.35
+ },
+ {
+  "text": "Genes? Then why does he smell like a MARKER?!",
+  "who": "dad",
+  "s": 12.93,
+  "e": 15.525,
+  "pre": 0.75
+ },
+ {
+  "text": "Hey, neighbor. Did I leave my cap at your place?",
+  "who": "neighbor",
+  "s": 17.025,
+  "e": 19.193,
+  "pre": 0.8
+ },
+ {
+  "text": "",
+  "who": "end",
+  "s": 25.383,
+  "e": 25.393,
+  "pre": 0
+ }
+]

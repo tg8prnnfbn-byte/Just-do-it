@@ -7,7 +7,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 SR = 48000
-lines = json.load(open(HERE / "lines_uk.json", encoding="utf-8"))
+lines = json.load(open(HERE / "lines_en.json", encoding="utf-8"))
 # (пауза ПЕРЕД реплікою, пауза ПІСЛЯ)
 PLAN = [(2.3, 0.45), (0.35, 0.45), (0.35, 0.55), (0.75, 0.7), (0.8, 1.9)]
 TAIL = 4.3   # слепстік після останньої репліки (кадр 5б + 6 враховано в PLAN[4][1] і тут)

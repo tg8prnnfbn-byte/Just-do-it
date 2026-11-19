@@ -16,8 +16,9 @@ from mathutils import Vector
 HERE = Path(__file__).resolve().parent
 FPS = 30
 RES = (720, 1280)          # рендер, потім апскейл до 1080x1920
-SHOTS = [("s1_exterior", 0, 180), ("s2_rules", 180, 360), ("s3_swing", 360, 570),
-         ("s4_speaker", 570, 720), ("s5_window", 720, 870), ("s6_hide", 870, 1080)]
+SHOTS = [("s01_exterior", 0, 180), ("s02_booth", 180, 360), ("s03_notebook", 360, 540), ("s04_photo", 540, 720),
+         ("s05_swing", 720, 900), ("s06_speaker", 900, 1080), ("s07_window", 1080, 1260), ("s08_photo13", 1260, 1440),
+         ("s09_hide", 1440, 1650), ("s10_empty", 1650, 1800)]
 R = random.Random(7)
 
 
@@ -105,7 +106,8 @@ def build():
     sc.frame_start, sc.frame_end = 0, SHOTS[-1][2] - 1
     sc.render.engine = "CYCLES"
     sc.cycles.device = "CPU"
-    sc.cycles.samples = 16
+    sc.cycles.samples = 12
+    sc.render.use_overwrite = False
     sc.cycles.adaptive_threshold = 0.04
     sc.render.use_persistent_data = True
     sc.cycles.use_denoising = True
@@ -157,7 +159,7 @@ def build():
     pm = bpy.data.materials.new("paper")
     pm.use_nodes = True
     it = pm.node_tree.nodes.new("ShaderNodeTexImage")
-    it.image = bpy.data.images.load(str(HERE / "tex" / "rules.png"))
+    it.image = bpy.data.images.load(str(HERE / "tex" / "notebook.png"))
     pm.node_tree.links.new(it.outputs["Color"], pm.node_tree.nodes["Principled BSDF"].inputs["Base Color"])
     pm.node_tree.nodes["Principled BSDF"].inputs["Roughness"].default_value = 0.9
     M["paper"] = pm
@@ -268,6 +270,26 @@ def build():
     cyl("desk_lamp_shade", (BX + 0.45, 1.3, 1.15), 0.14, 0.16, M["blue"], r2=0.04, rot=(0, math.radians(30), 0), verts=16)
     point_light("desk_light", (BX + 0.35, 1.25, 1.05), 18, (1, 0.8, 0.55), 0.05)
     box("flashlight", (BX - 0.6, 1.35, 0.8), (0.25, 0.05, 0.05), M["metal"], 0)
+    # групове фото на стіні: дві версії (12 і 13 дітей), рамка; стілець
+    photos = []
+    for nm in ("photo12", "photo13"):
+        pmat = bpy.data.materials.new(nm)
+        pmat.use_nodes = True
+        ti = pmat.node_tree.nodes.new("ShaderNodeTexImage")
+        ti.image = bpy.data.images.load(str(HERE / "tex" / f"{nm}.png"))
+        pmat.node_tree.links.new(ti.outputs["Color"], pmat.node_tree.nodes["Principled BSDF"].inputs["Base Color"])
+        pmat.node_tree.nodes["Principled BSDF"].inputs["Roughness"].default_value = 0.6
+        ph = obj_add(bpy.ops.mesh.primitive_plane_add, nm, pmat, size=1, location=(BX - 1.0, 1.935, 1.9))
+        ph.scale = (0.75, 0.53, 1)
+        ph.rotation_euler = (math.radians(90), 0, 0)
+        photos.append(ph)
+    box("photo_frame", (BX - 1.0, 1.945, 1.9), (0.82, 0.02, 0.6), M["wood"], 0.0)
+    point_light("photo_light", (BX - 1.0, 1.2, 2.5), 14, (1, 0.85, 0.65), 0.2)
+    box("chair_seat", (BX - 0.1, 0.55, 0.45), (0.45, 0.45, 0.05), M["wood"])
+    box("chair_back", (BX - 0.1, 0.33, 0.75), (0.45, 0.05, 0.55), M["wood"])
+    for dx in (-0.2, 0.2):
+        for dy in (0.35, 0.75):
+            box(f"chair_leg_{dx}_{dy}", (BX - 0.1 + dx, dy, 0.22), (0.04, 0.04, 0.44), M["wood"], 0)
 
     # сторож (видно ззаду)
     def watchman(loc):
@@ -303,7 +325,7 @@ def build():
     sh_ = sphere("win_kid_sh", (5.5, 9.41, 4.83), 0.25, M["kid"])
     sh_.scale = (1.0, 0.04, 0.45)
     wkh = cyl("win_kid_head", (5.5, 9.41, 5.12), 0.2, 0.01, M["kid"], rot=(math.radians(90), 0, 0), verts=20)
-    return sc, M, lamps, pivot, torch, kids, (wk, wkh, sh_), lit_upper
+    return sc, M, lamps, pivot, torch, kids, (wk, wkh, sh_), photos
 
 
 # ---------- анімація й камери ----------
@@ -330,75 +352,94 @@ def cam_path(cam, keys):
         cam.keyframe_insert("rotation_euler", frame=f)
 
 
-def animate(sc, M, lamps, pivot, torch, kids, win_kid, lit_upper):
-    eye_mat = M["eye"]
-    eye_in = eye_mat.node_tree.nodes["Principled BSDF"].inputs["Emission Strength"]
-    # гойдалка гойдається сама (згасаюча амплітуда, далі знов розгойдується)
-    for f in range(0, 1080, 12):
-        a = math.radians(24 * math.sin(f / 30 * 2 * math.pi / 2.4))
-        pivot.rotation_euler = (a, 0, 0)
+def hide_between(o, show_from, hide_from=None):
+    o.hide_render = True
+    o.keyframe_insert("hide_render", frame=0)
+    if show_from is not None:
+        o.hide_render = False
+        o.keyframe_insert("hide_render", frame=show_from)
+    if hide_from is not None:
+        o.hide_render = True
+        o.keyframe_insert("hide_render", frame=hide_from)
+
+
+def animate(sc, M, lamps, pivot, torch, kids, win_kid, photos):
+    END = SHOTS[-1][2]
+    eye_in = M["eye"].node_tree.nodes["Principled BSDF"].inputs["Emission Strength"]
+    for f in range(0, END, 12):                                   # гойдалка гойдається сама
+        pivot.rotation_euler = (math.radians(24 * math.sin(f / 30 * 2 * math.pi / 2.4)), 0, 0)
         pivot.keyframe_insert("rotation_euler", frame=f)
-    # мерехтіння ліхтаря №0 і повне згасання в кадрі 6
     L0 = lamps[0]
-    for f in range(0, 1080, 2):
+    for f in range(0, END, 2):                                    # мерехтіння ліхтаря і згасання в кадрі 9
         e = 700
-        if 400 < f < 470 and (f // 6) % 3 == 0:
+        if 780 < f < 850 and (f // 6) % 3 == 0:
             e = 40
-        if f >= 960:
-            e = 0 if f < 1040 else 0
-        if 950 <= f < 960 and f % 4 < 2:
+        if 1520 <= f < 1530 and f % 4 < 2:
             e = 30
+        if f >= 1530:
+            e = 0
         L0.data.energy = e
         L0.data.keyframe_insert("energy", frame=f)
-    # діти: приховані до кадру 6, з'являються після згасання ліхтаря, очі спалахують
-    for o in kids:
-        o.hide_render = True
-        o.keyframe_insert("hide_render", frame=0)
-        o.hide_render = False
-        o.keyframe_insert("hide_render", frame=965)
+    for o in kids:                                                # діти з'являються після згасання
+        hide_between(o, 1545)
     eye_in.default_value = 0.0
-    eye_in.keyframe_insert("default_value", frame=965)
+    eye_in.keyframe_insert("default_value", frame=1545)
     eye_in.default_value = 18.0
-    eye_in.keyframe_insert("default_value", frame=985)
-    # дитина у вікні: з'являється на середині кадру 5
-    for o in win_kid:
-        o.hide_render = True
-        o.keyframe_insert("hide_render", frame=0)
-        o.hide_render = False
-        o.keyframe_insert("hide_render", frame=800)
-    # ліхтарик сторожа вимикається разом з ліхтарем
-    torch.data.keyframe_insert("energy", frame=950)
+    eye_in.keyframe_insert("default_value", frame=1565)
+    for o in win_kid:                                             # силует у вікні
+        hide_between(o, 1170)
+    torch.data.keyframe_insert("energy", frame=1522)              # ліхтарик сторожа гасне
     torch.data.energy = 0
-    torch.data.keyframe_insert("energy", frame=958)
+    torch.data.keyframe_insert("energy", frame=1530)
+    p12, p13 = photos                                             # фото: 12 → 13 дітей
+    hide_between(p12, 0, 1260)
+    hide_between(p13, 1260)
+    dl = bpy.data.objects["desk_light"]                           # настільна лампа мерехтить у фіналі
+    for f in range(0, END, 2):
+        e = 18
+        if f > 1690 and (f // 4) % 5 == 0:
+            e = 3
+        if f > 1770:
+            e = 0 if (f // 2) % 3 else 6
+        dl.data.energy = e
+        dl.data.keyframe_insert("energy", frame=f)
 
+    BX = 60
     cams = []
-    c1 = camera("cam_s1", 30)                                    # 1: загальний, повільний наїзд крізь ворота
-    cam_path(c1, [(0, (0.0, -16.0, 1.7), (0.5, 6, 2.2)), (179, (0.0, -10.2, 1.6), (0.5, 6, 2.6))])
-    c2 = camera("cam_s2", 40)                                    # 2: аркуш з правилами, наїзд зверху
-    cam_path(c2, [(180, (59.75, 0.35, 1.55), (59.9, 1.1, 0.78)), (359, (59.85, 0.75, 1.15), (59.9, 1.1, 0.78))])
-    c3 = camera("cam_s3", 28)                                    # 3: кран донизу до гойдалки
-    cam_path(c3, [(360, (8.5, -6.0, 8.0), (3.6, 1.5, 1.0)), (569, (5.8, -2.2, 1.4), (3.6, 1.5, 1.0))])
-    c4 = camera("cam_s4", 50)                                    # 4: гучномовець, повільна орбіта, глибина різкості
-    c4.data.dof.use_dof = True
-    c4.data.dof.focus_distance = 3.4
-    c4.data.dof.aperture_fstop = 2.0
-    cam_path(c4, [(570, (9.0, -5.0, 5.0), (6.1, -5.4, 5.5)), (645, (8.4, -7.6, 4.8), (6.1, -5.4, 5.5)),
-                  (719, (6.6, -8.8, 4.9), (6.1, -5.4, 5.5))])
-    c5 = camera("cam_s5", 35)                                    # 5: наїзд на освітлене вікно другого поверху
-    cam_path(c5, [(720, (4.0, -3.0, 2.2), (5.5, 9.5, 5.0)), (869, (5.2, 4.0, 4.0), (5.5, 9.5, 5.0))])
-    c6 = camera("cam_s6", 30)                                    # 6: з-за плеча сторожа на майданчик
-    cam_path(c6, [(870, (1.55, -9.5, 2.0), (-0.4, 2.5, 0.9)), (1079, (1.35, -8.7, 1.92), (-0.4, 2.5, 0.9))])
-    cams = [c1, c2, c3, c4, c5, c6]
-    for (name, f0, f1), c in zip(SHOTS, cams):
-        mk = sc.timeline_markers.new(name, frame=f0)
-        mk.camera = c
-    sc.camera = c1
+    c = camera("cam_s01", 30); cams.append(c)                     # 1: двір, наїзд крізь ворота
+    cam_path(c, [(0, (0.0, -16.0, 1.7), (0.5, 6, 2.2)), (179, (0.0, -10.2, 1.6), (0.5, 6, 2.6))])
+    c = camera("cam_s02", 40); cams.append(c)                     # 2: будка, наїзд на зошит
+    cam_path(c, [(180, (BX - 0.25, -0.6, 1.7), (BX - 0.1, 1.1, 0.8)), (359, (BX - 0.15, 0.6, 1.25), (BX - 0.1, 1.1, 0.78))])
+    c = camera("cam_s03", 38); cams.append(c)                     # 3: зошит крупно, камера йде вниз по сторінці
+    cam_path(c, [(360, (BX - 0.1, 0.96, 1.08), (BX - 0.1, 1.17, 0.785)), (539, (BX - 0.1, 0.84, 1.04), (BX - 0.1, 1.02, 0.785))])
+    c = camera("cam_s04", 40); cams.append(c)                     # 4: фото групи на стіні
+    cam_path(c, [(540, (BX - 1.0, 0.1, 1.65), (BX - 1.0, 1.94, 1.9)), (719, (BX - 1.0, 1.05, 1.85), (BX - 1.0, 1.94, 1.9))])
+    c = camera("cam_s05", 28); cams.append(c)                     # 5: кран до гойдалки
+    cam_path(c, [(720, (8.5, -6.0, 8.0), (3.6, 1.5, 1.0)), (899, (5.8, -2.2, 1.4), (3.6, 1.5, 1.0))])
+    c = camera("cam_s06", 50); cams.append(c)                     # 6: гучномовець, орбіта, глибина різкості
+    c.data.dof.use_dof = True
+    c.data.dof.focus_distance = 3.4
+    c.data.dof.aperture_fstop = 2.0
+    cam_path(c, [(900, (9.0, -5.0, 5.0), (6.1, -5.4, 5.5)), (990, (8.4, -7.6, 4.8), (6.1, -5.4, 5.5)),
+                 (1079, (6.6, -8.8, 4.9), (6.1, -5.4, 5.5))])
+    c = camera("cam_s07", 35); cams.append(c)                     # 7: вікно другого поверху
+    cam_path(c, [(1080, (4.0, -3.0, 2.2), (5.5, 9.5, 5.0)), (1259, (5.2, 4.0, 4.0), (5.5, 9.5, 5.0))])
+    c = camera("cam_s08", 50); cams.append(c)                     # 8: фото знову — тринадцятий у кашкеті
+    cam_path(c, [(1260, (BX - 1.0, 0.9, 1.88), (BX - 1.0, 1.94, 1.9)), (1350, (BX - 0.9, 1.35, 1.86), (BX - 0.8, 1.94, 1.85)),
+                 (1439, (BX - 0.73, 1.68, 1.83), (BX - 0.72, 1.94, 1.82))])
+    c = camera("cam_s09", 30); cams.append(c)                     # 9: з-за плеча сторожа: ліхтар гасне, діти
+    cam_path(c, [(1440, (1.55, -9.5, 2.0), (-0.4, 2.5, 0.9)), (1649, (1.35, -8.7, 1.92), (-0.4, 2.5, 0.9))])
+    c = camera("cam_s10", 32); cams.append(c)                     # 10: порожня будка, камера відступає
+    cam_path(c, [(1650, (BX, 0.2, 1.35), (BX, 1.3, 0.9)), (1799, (BX + 0.2, -2.6, 1.6), (BX, 1.3, 1.0))])
+    for (name, f0, f1), cm in zip(SHOTS, cams):
+        sc.timeline_markers.new(name, frame=f0).camera = cm
+    sc.camera = cams[0]
 
 
 def main():
     args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:]
-    sc, M, lamps, pivot, torch, kids, win_kid, lit_upper = build()
-    animate(sc, M, lamps, pivot, torch, kids, win_kid, lit_upper)
+    sc, M, lamps, pivot, torch, kids, win_kid, photos = build()
+    animate(sc, M, lamps, pivot, torch, kids, win_kid, photos)
     if "--save" in args:
         bpy.ops.wm.save_as_mainfile(filepath=str(Path(args[args.index("--save") + 1]).resolve()))
     if "--still" in args:                                        # окремі кадри для перевірки

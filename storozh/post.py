@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 frames, audio, out = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+count = sys.argv[4] if len(sys.argv) > 4 else None    # скільки кадрів узяти (напр. 150 = 5 с)
 vf = ("scale=1080:1920:flags=lanczos,"
       "colorbalance=rs=-0.03:bs=0.05:rh=0.04:bh=-0.03,"
       "eq=contrast=1.06:saturation=1.08:gamma=1.04,"
@@ -17,6 +18,8 @@ vf = ("scale=1080:1920:flags=lanczos,"
 cmd = ["ffmpeg", "-y", "-loglevel", "error", "-framerate", "30", "-start_number", "0", "-i", str(frames / "f_%04d.png")]
 if Path(audio).exists():
     cmd += ["-i", audio, "-map", "0:v", "-map", "1:a", "-c:a", "aac", "-b:a", "192k", "-shortest"]
+if count:
+    cmd += ["-frames:v", count]
 cmd += ["-vf", vf, "-c:v", "libx264", "-preset", "slow", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out]
 subprocess.run(cmd, check=True)
 print("Готово:", out)
